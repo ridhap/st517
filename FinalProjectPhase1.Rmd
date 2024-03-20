@@ -1,0 +1,334 @@
+---
+title: "Final Project Phase 1 :  Project Strategy Planning"
+author: "Ridha Paramesh"
+output:
+  pdf_document:
+    latex_engine: xelatex
+---
+
+# Objective:
+
+The project aims to conduct a thorough analysis of household-level responses to the American Community Survey for households in Oregon, using a subset of variables from the 2015 1-year survey. The objective is to gain insights into demographic patterns, socio-economic factors, and electricity payment behaviors within the specified criteria, ensuring clarity in the analysis process and justifying any modifications made.
+
+We are then asked to create a model to predict electricity costs for a typical Oregon household. Lets break it into smaller, more manageable questions to aid in our analysis as follows:
+
+-   [ ] Is there a need to clean the data?
+-   [ ] What is the average cost of electricity for apartments?
+-   [ ] What is the average cost of electricity for houses?
+-   [ ] Is there a statistically significant difference between the electricity costs in apartments and houses?
+-   [ ] Which predictive model is most effective in estimating electricity costs?
+-   [ ] What is the distribution of monthly electricity costs (ELEP) across different types of dwellings in Oregon?
+-   [ ] Does the number of bedrooms (BDSP) correlate with electricity costs (ELEP) across dwellings?
+-   [ ] How do electricity costs (ELEP) vary with the tenure of the household (TEN)?
+-   [ ] Is there a significant difference in electricity costs (ELEP) between households with and without persons under 18 (R18)?
+-   [ ] Can we predict electricity costs (ELEP) using dwelling characteristics (BLD, BDSP, NP) and household demographics (R18, R60)?
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo = TRUE)
+ 
+library(Amelia)
+library(broom)
+library(faraway)
+library(ggplot2)
+library(pairsD3)
+library(leaps)
+library(tidyverse)
+library(dplyr)
+```
+
+```{r}
+# Load the dataset
+data <- read.csv("OR_acs_house_occ.csv")
+# Explore the dataset
+summary(data)
+str(data)
+head(data)
+```
+
+## Check for missing values
+
+```{r}
+colSums(is.na(data))
+data$zip <- rownames(data)
+df_long <- gather(data, variable, value, -zip)
+
+qplot(zip, variable, data = df_long, geom= "tile", 
+      fill = is.na(value)) + 
+  scale_fill_manual("missing?" , values = c('TRUE'="red", 'FALSE' = "white")) + 
+  theme (axis.text.x = element_text(angle=90))
+
+
+
+
+data$zip <- rownames(data)
+dfN <- data[, c('ACR', 'ELEP', 'VALP')]
+dfN_long <- gather(dfN, var, val, -ELEP)
+qplot(ELEP, var, data = dfN_long, geom = "tile",
+      fill = is.na(val)) +
+  scale_fill_manual("missing?",
+                    values = c('TRUE' = "brown", 'FALSE' = "white")) +
+  theme(axis.text.x = element_text(angle = 0))
+
+valpMissingHist_df <- subset(data[, c('VALP', 'ELEP')], is.na(VALP) == TRUE) 
+hist(valpMissingHist_df[, 'ELEP'], main = 'VALP Missingness Histogram', xlab = 'ELEP', col = "orange")
+
+valpNoMissingHist_df <- subset(data[, c('VALP', 'ELEP')], is.na(VALP) == FALSE) 
+qplot(valpNoMissingHist_df[, 'VALP'], valpNoMissingHist_df[, 'ELEP'], main = 'VALP VS ELEP Scatter', ylab = 'ELEP', xlab = 'VALP') 
+acrMissingHist_df <- subset(data[, c('ACR', 'ELEP')], is.na(ACR) == TRUE) 
+hist(acrMissingHist_df[, 'ELEP'], main = 'ACR Missingness Histogram', xlab = 'ELEP', col = "lightpink")
+
+acrNoMissingHist_df <- subset(data[, c('ACR', 'ELEP')], is.na(ACR) == FALSE) 
+qplot(as.numeric(factor(acrNoMissingHist_df[, 'ACR'])), acrNoMissingHist_df[, 'ELEP'], main = 'ACR VS ELEP Scatter', ylab = 'ELEP', xlab = 'ACR')
+```
+
+Data cleaning was necessary for this dataset, primarily addressing missing values. Specifically, variables ACR and VALP exhibited a notable number of null values, with 2586 and 4632 missing entries, respectively. Analysis of the missingness distribution histograms indicated that both VALP and ACR were missing-not-at-random, with a higher prevalence of missing values at the lower end of the ELEP histograms.
+
+Upon inspection of scatter plots depicting the relationship between ACR/VALP and ELEP, minimal correlation was observed. Given these findings, it is recommended to exclude ACR and VALP from the analysis. These variables represent property value and lot size, and their removal is unlikely to adversely impact the study, as suggested by the scatter plots.
+
+## Few plots to understand the Dataset deeper
+
+```{r}
+
+# Data Cleaning
+
+#Distribution of Monthly Electricity Costs Across Different Types of Dwellings
+data %>%
+  ggplot(aes(x = ELEP, fill = as.factor(BLD))) +
+  geom_histogram(position = "identity", alpha = 0.6, bins = 30) +
+  scale_fill_brewer(palette = "Set3") +
+  labs(x = "Monthly Electricity Cost ($)",
+       y = "Count",
+       fill = "Dwelling Type",
+       title = "Distribution of Monthly Electricity Costs by Dwelling Type") +
+  theme_minimal()
+
+# Convert relevant variables to appropriate data types
+data$ELEP <- as.numeric(as.character(data$ELEP))
+data$BDSP <- as.numeric(as.character(data$BDSP))
+data$NP <- as.numeric(as.character(data$NP))
+
+
+# Univariate Analysis
+# Analyze distribution of electricity costs
+hist(data$ELEP, main = "Distribution of Electricity Costs", xlab = "Electricity Costs ($)", breaks = 50, col = "lightgreen")
+
+# Bedrooms and Occupants
+hist(data$BDSP, main = "Distribution of Number of Bedrooms", xlab = "Number of Bedrooms", breaks = 10, col = "lightblue")
+hist(data$NP, main = "Distribution of Number of Occupants", xlab = "Number of Occupants", breaks = 10,col = "lightyellow")
+
+# Bivariate Analysis
+# Explore relationships between electricity costs and number of bedrooms/occupants
+plot(data$BDSP, data$ELEP, main = "Electricity Costs vs. Number of Bedrooms", xlab = "Number of Bedrooms", ylab = "Electricity Costs ($)")
+plot(data$NP, data$ELEP, main = "Electricity Costs vs. Number of Occupants", xlab = "Number of Occupants", ylab = "Electricity Costs ($)")
+plot(data$FULP, data$ELEP, main = 'Electricity Monthly Cost vs.  Fuel Cost', xlab ='Cost'  , ylab = 'Fuel Cost') 
+plot(data$GASP, data$ELEP, main = 'Electricity Cost vs. Gas Monthly Cost ', xlab =  'Cost', ylab = 'Gas Cost') 
+
+# Identify and compare electricity costs between apartments and houses
+# Assuming BLD variable indicates the type of housing with codes for apartments and houses
+apartments <- data %>% filter(BLD >= 4 & BLD <= 9)  # Assuming codes 4-9 are apartment types
+houses <- data %>% filter(BLD == 2 | BLD == 3)      # Assuming codes 2 and 3 are house types
+
+#Electricity Costs by Tenure of the Household
+data %>%
+  group_by(TEN) %>%
+  summarise(Average_ELEP = mean(ELEP, na.rm = TRUE)) %>%
+  ggplot(aes(x = as.factor(TEN), y = Average_ELEP, fill = as.factor(TEN))) +
+  geom_bar(stat = "identity") +
+  scale_fill_brewer(palette = "Pastel1") +
+  labs(x = "Tenure",
+       y = "Average Monthly Electricity Cost ($)",
+       fill = "Tenure",
+       title = "Average Monthly Electricity Costs by Tenure") +
+  theme_minimal()
+
+```
+
+From the plots we can say that there is :
+
+NO SIGNIFICANT VISUAL CORRELATION BETWEEN COST AND NUMBER OF OCCUPANTS
+
+NO SIGNIFICANT VISUAL CORRELATION BETWEEN COST AND GAS PRICS
+
+MAYBE CORRELATION BETWEEN COST AND FUELCOST
+
+MAYBE CORRELATION BETWEEN BETWEEN COST AND NUMBER OF BEDROOMS
+
+### **Broader Predicting Electricity Costs Using Dwelling Characteristics and Household Demographics**
+
+```{r}
+# Assuming ELEP is numeric and other predictors are appropriately coded
+model <- lm(ELEP ~ BDSP + NP + as.factor(BLD) + as.factor(R18) + as.factor(R60), data = data)
+summary(model)
+
+```
+
+The predictive model described serves as an initial approach to understand the relationship between electricity costs and various household and dwelling characteristics. It provides a broad overview rather than a deep analytical prediction, primarily because it relies on linear relationships and assumes a simplistic interaction between variables. While useful for identifying potential predictors and their general direction of influence, this model does not account for more complex dynamics, non-linear relationships, or interactions between predictors that could significantly affect accuracy. It's a starting point for exploratory analysis, meant to highlight areas for further, more sophisticated modeling efforts, such as incorporating polynomial terms, interaction effects, or using advanced techniques.
+
+```{r}
+panel.hist <- function(x, ...) {
+  usr <- par("usr")
+  on.exit(par(usr))
+  par(usr = c(usr[1:2], 0, 1.5) )
+  h <- hist(x, plot = FALSE)
+  breaks <- h$breaks
+  nB <- length(breaks)
+  y <- h$counts
+  y <- y/max(y)
+  rect(breaks[-nB], 0, breaks[-1], y, col = "white", ...)
+}
+
+
+panel.cor <- function(x, y, digits = 2, prefix = "", cex.cor, ...) {
+  usr <- par("usr")
+  on.exit(par(usr))
+  par(usr = c(0, 1, 0, 1))
+  r <- abs(cor(x, y, use = "complete.obs"))
+  txt <- format(c(r, 0.123456789), digits = digits)[1]
+  txt <- paste(prefix, txt, sep = "")
+  if (missing(cex.cor)) cex.cor <- 0.8/strwidth(txt)
+  text(0.5, 0.5, txt, cex =  cex.cor * (1 + r) / 2)
+}
+
+```
+
+## Correlation check
+
+```{r}
+# Correlation check
+data.corr <- data[, c('ELEP', 'NP', 'BDSP', 'BLD', 'FULP', 'GASP', 'HFL', 'RMSP', 'TEN', 'YBL', 'R18', 'R60')]
+data.corr[c('BLD', 'HFL', 'TEN', 'YBL', 'R18', 'R60')] <- lapply(data.corr[c('BLD', 'HFL', 'TEN', 'YBL', 'R18', 'R60')], function(x) as.numeric(factor(x)))
+
+plot(data.corr)
+summary(data.corr)
+
+pairs(data.corr, upper.panel = panel.cor, diag.panel = panel.hist, lower.panel = panel.smooth, gap = 1/5, pch = 20)
+
+```
+
+Once the analysis of data missingness was completed, steps were taken to rank relevant fields and potentially eliminate any practically irrelevant ones from the dataset. Following identification, these fields underwent a correlation check with ELEP before considering complete removal.
+
+For several categorical fields (BLD, HFL, TEN, YBL, R18, R60), conversion to numeric was necessary for correlation assessment. The complete scatter matrix is provided in Appendix X, and correlation metrics are detailed below. Upon examination, none of the practically relevant factors exhibited noteworthy correlations, confirming their insignificance in the model. Notably, RMSP and BDSP displayed a high correlation (0.72), leading to the recommendation of excluding RMSP to avoid redundancy.
+
+While FULP, GASP, and YBL did not exhibit significant correlations, their relevance is confirmed to be minimal. Therefore, it is suggested to retain BLD, HFL, BDSP, NP, and ELEP for continued consideration.
+
+|                                                                            |                                                                                                                                                                                                                                                                                                                                                    |                                                                                                                                                             |                                                                         |
+|----------------|------------------------|----------------|----------------|
+| Field                                                                      | Description                                                                                                                                                                                                                                                                                                                                        | Relevance to ELEP                                                                                                                                           | Correlation to ELEP                                                     |
+| SERIALNO TYPE NP ACR BDSP BLD ELEP FULP GASP HFL RMSP TEN VALP YBL R18 R60 | Serial Number Type of Unit Number of Persons in the house Lot size Number of Bedrooms Units in Structure Electricity (monthly Cost) Yearly Fuel Cost (excluding gas & electricity) Gas (monthly cost) House Heating Fuel Number of Rooms Tenure Property value When structure first built Presence of persons under 18 Presence of persons over 59 | No No (always 1) Yes (requires modification) - Yes Yes (requires modification) Yes Maybe Maybe Yes (requires modification) Yes (Redundant) No - Maybe No No | N/A N/A 0.28 - 0.26 0.18 1 0.06 0.029 0.14 0.23 0.077 - 0.01 0.16 0.013 |
+
+## Cleaning the Columns
+
+```{r}
+# DECLARE FINAL CUSTOM DATAFRAAME
+df_custom <- data[, c('ELEP', 'FULP', 'GASP', 'YBL', 'BLD', 'HFL', 'BDSP', 'NP')]
+head(df_custom)
+
+new_df <- df_custom %>%
+  filter(!(BLD %in% c('Mobile home or trailer', 'Boat, RV, van, etc.'))) %>%
+  mutate(
+    BLD_Adjusted = case_when(
+      grepl('house', BLD, fixed = TRUE) ~ 'House',
+      TRUE ~ 'Apartment'
+    ),
+    HFL_Adjusted = case_when(
+      grepl('Electricity', HFL, fixed = TRUE) ~ 'Electricity',
+      TRUE ~ 'Not Electricity'
+    ),
+    YBL_Adjusted = ifelse(YBL >= 2005, '2005 to 2015', as.character(YBL))
+  )
+
+head(new_df)
+summary(new_df)
+
+```
+
+# Explanatory Model for Multiple Regression
+
+## Proposed Method
+
+This study employs regression models to estimate the monthly electricity bill difference between apartments and houses in Oregon. We designate BLD as 0 for apartments and 1 for houses. The full model with interactions, represented as $(ELEP|BLD,BDSP,NP) = \beta_0 + \beta_1{BLD} + \beta_2{BDSP} + \beta_3{NP} + \beta_4{(BLD * NP)} + \beta_5{(BLD * BDSP)} + \beta_6{(BLD * BDSP * NP)}$, is compared to a reduced model lacking interaction terms, given by $(ELEP|BLD,BDSP,NP) = \beta_0 + \beta_1{BLD} + \beta_2{BDSP} + \beta_3{NP}$. The comparison favors the full model as the more suitable option (Extra SS F-test, p-value=0.0008967).
+
+To refine the model, insignificant interaction terms and three-variable interaction terms are removed to mitigate noise and over-fitting. The resulting model, $\mu(ELEP|BLD,BDSP,NP) = \beta_0 + \beta_1{BLD} + \beta_2{BDSP} + \beta_3{NP} + \beta_4{(BDSP * NP)} + \beta_5{(BLD * BDSP)}$, is considered post-training. However, a comparison of AIC and BIC values suggests that the reduced model, without interaction terms, is more appropriate for this study.
+
+```{r}
+new_df$HA <- "bbbbb"
+new_df$HA[which(grepl("house",new_df$BLD))] <- "house"
+new_df$HA[which(grepl("apartment",new_df$BLD,ignore.case=TRUE))] <- "apt"
+
+df_final <- subset(new_df, HA!="bbbbb" )
+summary(df_final)
+
+```
+
+```{r}
+# Fitting rich model with interactions
+full_model <- lm(ELEP ~ HA * BDSP * NP, data = df_final)
+summary(full_model)
+
+```
+
+```{r}
+# Residual Plots for full model with interactions
+residual_plots <- broom::augment(full_model, data = df_final)
+qplot(.fitted, .resid, data = residual_plots)
+qplot(BLD, .resid, data = residual_plots)
+qplot(NP, .resid, data = residual_plots)
+qplot(BDSP, .resid, data = residual_plots)
+```
+
+```{r}
+# Fitting Model without interactions
+reduced_model <- lm(ELEP ~ HA + BDSP + NP, data = df_final)
+summary(reduced_model)
+```
+
+```{r}
+# Checking for multicollinearity
+vif_values <- vif(reduced_model)
+barplot(vif_values, main = "VIF Values", horiz = TRUE, col = "lightblue")
+abline(v = 5, lwd = 3, lty = 2)
+
+```
+
+```{r}
+# Comparing model with and without interactions
+anova(reduced_model, full_model)
+```
+
+```{r}
+# Fitting regression model with some interactions
+selected_model <- lm(ELEP ~ HA + BDSP * NP + HA:BDSP, data = df_final)
+summary(selected_model)
+```
+
+```{r}
+# Comparing model without interaction and considered model above.
+anova(reduced_model, selected_model)
+AIC(reduced_model, selected_model)
+BIC(reduced_model, selected_model)
+
+```
+
+```{r}
+# Extracting estimates and CI of model without interactions.
+summary(reduced_model)$coefficients
+
+confint(reduced_model)
+
+```
+
+Utilizing data from the American Community Survey on households, a multiple linear regression approach was employed to assess the average disparity in monthly electricity bills between individuals residing in apartments and houses in Oregon. The established regression model takes the form: Let BLD = 0 for apartments and 1 for houses, $\mu(ELEP|BLD,BDSP,NP) = \beta_0 + \beta_1{BLD} + \beta_2{BDSP} + \beta_3{NP}$.
+
+The findings indicate that, on average, individuals in apartments experience a monthly electricity bill approximately \$19.47 lower than those residing in houses in Oregon, accounting for the number of occupants and bedrooms. With a 95% confidence level, the estimated average difference in monthly electricity bills for apartments and houses, considering a fixed number of occupants and bedrooms, falls within the range of \$15.96 to \$22.99, respectively.
+
+# Prediction Problem Strategy
+
+## Proposed Meathod
+
+For the prediction problem strategy, the goal is to develop a model capable of accurately forecasting electricity costs for households in Oregon. This endeavor demands meticulous data preparation, which includes cleaning and feature engineering, alongside the evaluation of the model.
+
+In the analysis of the Oregon household dataset from the American Community Survey, multiple regression is employed to forecast electricity costs. Upon scrutinizing the data, it is observed that the ACR and VALR variables contain missing values, prompting their exclusion from the dataset due to their minimal contribution to predicting electricity costs. The variable SERIALNO, serving as a unique identifier, is also omitted from the model as it imparts no supplementary information. Additionally, the exclusion of the TYPE variable from the predictive model is justified by its collinearity with other predictor variables, offering negligible additional insights to the model.
+
+The methodology I want to follow integrates forward validation set approaches, further strengthened by a 10-fold k-means cross-validation to ensure robustness and reliability in model comparisons. Key evaluation metrics, such as root mean squared error(RMSE), Adjusted R-Squared, BIC, and CP values, will be examined across all models.
+
+Following this thorough analysis, the decision on whether to proceed with the exhaustive or forward validation methods will hinge on the performance metrics' comparative outcomes. This structured approach is designed to ensure that the predictive model is not only precise but also generalizable to new data, providing insightful observations into the dynamics affecting electricity costs in Oregon households.
